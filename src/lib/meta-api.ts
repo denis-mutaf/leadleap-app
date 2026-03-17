@@ -63,29 +63,36 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
 
 const INSIGHT_FIELDS = [
   'campaign_id', 'campaign_name', 'spend', 'impressions', 'clicks',
+  'outbound_clicks',
   'results', 'cpm', 'cpc', 'ctr', 'reach', 'frequency',
-  'actions', 'date_start', 'account_currency',
+  'actions', 'action_values', 'date_start', 'account_currency',
   'video_p25_watched_actions', 'video_p50_watched_actions',
   'video_p75_watched_actions', 'video_p100_watched_actions',
   'video_thruplay_watched_actions',
+  'purchase_roas', 'quality_ranking', 'engagement_rate_ranking',
+  'conversion_rate_ranking', 'cost_per_action_type',
 ].join(',')
 
 const ADSET_FIELDS = [
   'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-  'spend', 'impressions', 'clicks', 'results', 'cpm', 'cpc', 'ctr',
-  'reach', 'frequency', 'actions', 'date_start', 'account_currency',
+  'spend', 'impressions', 'clicks', 'outbound_clicks', 'results', 'cpm', 'cpc', 'ctr',
+  'reach', 'frequency', 'actions', 'action_values', 'date_start', 'account_currency',
   'video_p25_watched_actions', 'video_p50_watched_actions',
   'video_p75_watched_actions', 'video_p100_watched_actions',
   'video_thruplay_watched_actions',
+  'purchase_roas', 'quality_ranking', 'engagement_rate_ranking',
+  'conversion_rate_ranking', 'cost_per_action_type',
 ].join(',')
 
 const AD_FIELDS = [
   'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-  'ad_id', 'ad_name', 'spend', 'impressions', 'clicks', 'results',
-  'cpm', 'cpc', 'ctr', 'reach', 'frequency', 'actions', 'date_start',
+  'ad_id', 'ad_name', 'spend', 'impressions', 'clicks', 'outbound_clicks', 'results',
+  'cpm', 'cpc', 'ctr', 'reach', 'frequency', 'actions', 'action_values', 'date_start',
   'account_currency', 'video_p25_watched_actions', 'video_p50_watched_actions',
   'video_p75_watched_actions', 'video_p100_watched_actions',
   'video_thruplay_watched_actions',
+  'purchase_roas', 'quality_ranking', 'engagement_rate_ranking',
+  'conversion_rate_ranking', 'cost_per_action_type',
 ].join(',')
 
 function buildInsightsUrl(
@@ -152,6 +159,17 @@ export async function fetchMetaDemographicInsights(
 ): Promise<MetaRawRow[]> {
   const fields = 'campaign_id,campaign_name,age,gender,spend,impressions,clicks,actions,cpm,cpc,ctr,date_start'
   const url = buildInsightsUrl(accountId, token, fields, 'campaign', dateFrom, dateTo, 'age,gender')
+  return fetchAllPages<MetaRawRow>(url)
+}
+
+export async function fetchMetaDeviceInsights(
+  accountId: string,
+  token: string,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<MetaRawRow[]> {
+  const fields = 'campaign_id,campaign_name,device_platform,spend,impressions,clicks,actions,cpm,cpc,ctr,date_start'
+  const url = buildInsightsUrl(accountId, token, fields, 'campaign', dateFrom, dateTo, 'device_platform')
   return fetchAllPages<MetaRawRow>(url)
 }
 

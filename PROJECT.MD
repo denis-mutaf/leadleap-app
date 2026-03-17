@@ -8,14 +8,19 @@
   - генератор креативов (внешний API по `NEXT_PUBLIC_API_URL`);
   - раздел рекламы (Meta Ads): аккаунты, синхронизация инсайтов, дашборд, кампании, адсеты, объявления, демография/плейсменты/гео/почасовые.
 
+Дополнительно:
+
+- Подробная документация по Meta Ads: `meta.md` (запросы к Meta, поля, таблицы, синхронизация, UI-метрики, `outbound_clicks`).
+
 ## Технологический стек
 
 - **Фреймворк**: Next.js 16 (App Router, `src/`-директория)
 - **Язык**: TypeScript (`strict: true`)
 - **UI**:
   - Tailwind CSS v4
-  - shadcn/ui (card, badge, dropdown-menu, avatar, tooltip, separator, button, dialog, input, label, switch, select, textarea, alert, skeleton, sheet)
+  - shadcn/ui (card, badge, dropdown-menu, avatar, tooltip, separator, button, dialog, input, label, switch, select, textarea, alert, skeleton, sheet, **calendar**, **popover**, **table**, **chart** — ChartContainer, ChartTooltip, ChartTooltipContent)
   - Lucide React (иконки)
+  - date-fns (форматирование дат, в т.ч. в дашборде рекламы)
 - **Тема**:
   - `next-themes` (dark/light, default: dark)
   - собственный `ThemeProvider` и `ThemeToggle`
@@ -39,6 +44,8 @@
 - `src/app/(app)/layout.tsx`
   - Основной layout для "приложения" с левой панелью `Sidebar` и правым `main`.
 - Маршруты:
+  - `/` — корневая страница (`src/app/page.tsx`) редиректит на `/ads`.
+  - `(app)` — индекс (`src/app/(app)/page.tsx`) редиректит на `/knowledge-base`.
   - `/sign-in/[[...sign-in]]`
   - `/sign-up/[[...sign-up]]`
 
@@ -51,7 +58,7 @@
     - `/calls` — "Звонки"
     - `/managers` — "Менеджеры"
     - `/creatives` — "Креативы"
-    - `/ads` — "Реклама"
+    - `/ads/[slug]` — "Реклама" (slug берётся из активного проекта или из URL при гидрации)
     - `/settings` — "Настройки"
   - Включает `ProjectSwitcher`, `ThemeToggle`, аватар пользователя Clerk и кнопку "Выйти".
 - `src/components/settings-nav.tsx`
@@ -109,13 +116,14 @@
 
 - Все таблицы привязаны к `project_id` (FK на `projects(id)` on delete cascade), RLS: Allow all.
 - **meta_ad_accounts** — аккаунты Meta по проекту: `id`, `project_id`, `account_id`, `account_name`, `account_currency`, `is_active`, `created_at`. Уникальность: `(project_id, account_id)`.
-- **meta_campaign_insights** — дневные инсайты по кампаниям: `project_id`, `account_id`, `campaign_id`, `campaign_name`, `date`, метрики (spend, impressions, clicks, results, cpm, cpc, ctr, reach, frequency, video_*), `account_currency`, `fetched_at`. Уникальность: `(project_id, account_id, campaign_name, date)`.
+- **meta_campaign_insights** — дневные инсайты по кампаниям: `project_id`, `account_id`, `campaign_id`, `campaign_name`, `date`, метрики (spend, impressions, clicks, **outbound_clicks**, results, cpm, cpc, ctr, reach, frequency, video_*, а также quality/roas/json-поля), `account_currency`, `fetched_at`. Уникальность: `(project_id, account_id, campaign_id, date)` (устраняет дубли при переименовании кампаний).
 - **meta_adset_insights** — инсайты по адсетам: структура аналогична, уникальность `(project_id, account_id, adset_name, campaign_name, date)`.
 - **meta_ad_insights** — инсайты по объявлениям: уникальность `(project_id, account_id, ad_id, date)`.
 - **meta_demographic_insights** — разбивка по возрасту/полу: уникальность `(project_id, account_id, campaign_name, date, age, gender)`.
 - **meta_placement_insights** — по платформам/позициям: уникальность `(project_id, account_id, campaign_name, date, publisher_platform, platform_position)`.
 - **meta_geo_insights** — по странам/регионам: уникальность `(project_id, account_id, campaign_name, date, country, region)`.
 - **meta_hourly_insights** — почасовые: уникальность `(project_id, account_id, campaign_name, date, hour)`.
+- **meta_device_insights** — разбивка по `device_platform`: уникальность `(project_id, account_id, campaign_name, date, device_platform)`.
 
 ## API слои
 
@@ -181,7 +189,7 @@
 ### 5. Meta Ads API
 
 - Токен Meta: один на приложение — `META_ACCESS_TOKEN` (env). Все роуты используют `supabaseAdmin` из `@/lib/supabase`.
-- `src/lib/meta-api.ts` — утилиты: `normalizeAccountId`, `extractResults`, `extractActionValue`, `fetchWithBackoff`, `fetchAllPages`; функции загрузки: `fetchMetaAdAccounts`, `fetchMetaInsights`, `fetchMetaAdsetInsights`, `fetchMetaAdInsights`, `fetchMetaDemographicInsights`, `fetchMetaPlacementInsights`, `fetchMetaGeoInsights`, `fetchMetaHourlyInsights`, `fetchMetaAds`, `fetchMetaAdPreview`.
+- `src/lib/meta-api.ts` — утилиты: `normalizeAccountId`, `extractResults`, `extractActionValue`, `fetchWithBackoff`, `fetchAllPages`; функции загрузки: `fetchMetaAdAccounts`, `fetchMetaInsights`, `fetchMetaAdsetInsights`, `fetchMetaAdInsights`, `fetchMetaDemographicInsights`, `fetchMetaDeviceInsights`, `fetchMetaPlacementInsights`, `fetchMetaGeoInsights`, `fetchMetaHourlyInsights`, `fetchMetaAds`, `fetchMetaAdPreview`.
 - `src/app/api/meta/accounts/route.ts` — `GET` — список аккаунтов проекта (`projectId` обязателен), активные, сортировка по `account_name`.
 - `src/app/api/meta/sync-accounts/route.ts` — `POST` — body `{ projectId }`: загрузка аккаунтов из Meta API, upsert в `meta_ad_accounts` по `(project_id, account_id)`.
 - `src/app/api/meta/sync/route.ts` — `POST` — body `{ projectId, accountId, dateFrom?, dateTo? }`: синхронизация всех инсайтов (campaigns, adsets, ads, demographic, placement, geo, hourly) в соответствующие таблицы.
@@ -257,18 +265,26 @@
 
 ### 6. Ads (Реклама)
 
-- `src/types/meta.ts` — типы: `MetaAdAccount`, `MetaCampaignInsight`, `MetaAdsetInsight`, `MetaAdInsight`, `MetaDemographicInsight`, `MetaPlacementInsight`, `MetaGeoInsight`, `MetaHourlyInsight`, `CampaignAggregateRow`, `AdsetAggregateRow`.
+- `src/types/meta.ts` — типы: `MetaAdAccount`, `MetaCampaignInsight`, `MetaAdsetInsight`, `MetaAdInsight`, `MetaDemographicInsight`, `MetaPlacementInsight`, `MetaGeoInsight`, `MetaHourlyInsight`, `MetaDeviceInsight`, `CampaignAggregateRow`, `AdsetAggregateRow`.
 - `src/hooks/use-meta-account.ts` — Zustand store `useMetaAccountStore`: `selectedAccountId`, `setSelectedAccountId`; persist в localStorage `meta-account-store`.
-- Страницы используют `useProjectStore` (activeProject?.id) и `useMetaAccountStore`; во все запросы к Meta API передаётся `projectId`.
+- Дашборды:
+  - `src/app/(app)/ads/page.tsx` — легковесный client-редирект на `/ads/[slug]` после монтирования (учёт асинхронной гидрации Zustand).
+  - `src/app/(app)/ads/[slug]/page.tsx` — роутинг дашборда по `slug` **из URL** (source of truth): `topmag` → `TopmagDashboard`, иначе → `GenericAdsDashboard`.
+  - `src/components/dashboards/generic/index.tsx` — `GenericAdsDashboard` (базовый дашборд рекламы).
+  - `src/components/dashboards/topmag/index.tsx` — `TopmagDashboard` (кастомный дашборд TopMag; `projectId/accountId` захардкожены константами внутри компонента).
+
+Подробнее по всем данным Meta (какие поля забираем, как сохраняем, как считаем CTR/CPC, включая `outbound_clicks`) см. `meta.md`.
 - `src/app/(app)/ads/layout.tsx` — layout с анимацией (Framer Motion, AnimatePresence по pathname).
-- `src/app/(app)/ads/page.tsx` — дашборд «Реклама»:
-  - Тулбар: Select аккаунта (из `/api/meta/accounts?projectId=...`), период (dateFrom/dateTo), кнопки «Загрузить аккаунты» (POST sync-accounts, перезагрузка списка) и «Синхронизировать» (POST sync с projectId, accountId, dateFrom, dateTo).
-  - Шесть карточек метрик (расход, показы, клики, результаты, CTR, CPC), LineChart расхода по дням (Recharts), таблица топ-5 кампаний по spend, ссылка «Все кампании» → `/ads/campaigns`.
+- `GenericAdsDashboard` — дашборд «Реклама»:
+  - Тулбар: Select аккаунта (из `/api/meta/accounts?projectId=...`), период — **Popover + Calendar** (date-fns, даты «От»/«До»), кнопки «Аккаунты» (POST sync-accounts) и «Синхронизировать» (POST sync). В API даты передаются как `yyyy-MM-dd`.
+  - **8 KPI-карточек** (KpiCard): Расход, Показы, Клики, Результаты, CTR, CPC, CPM, Цена за результат; тренд-иконки (TrendingUp / TrendingDown / Minus). Сетка `grid-cols-4`.
+  - Два графика (Recharts): «Расход по дням» (AreaChart с градиентом, ResponsiveContainer, нативный Tooltip с theme-стилями), «CTR по дням» (LineChart, ResponsiveContainer, Tooltip).
+  - Таблица кампаний — **Table** (shadcn): топ **10** по расходам, колонки Кампания, Расход, Показы, Клики, CTR, CPC, Результаты. Ссылка «Все кампании» → `/ads/campaigns`.
   - Состояния: скелетоны, пустое состояние при отсутствии проекта/аккаунта или данных.
 - `src/app/(app)/ads/campaigns/layout.tsx` — такой же анимированный layout.
 - `src/app/(app)/ads/campaigns/page.tsx` — список кампаний (из insights с `groupBy=campaign`), ссылки на `/ads/campaigns/[campaignId]`.
-- `src/app/(app)/ads/campaigns/[campaignId]/page.tsx` — детали кампании: breadcrumbs, метрики (в т.ч. частота), LineChart расхода по дням, таблица адсетов (частота > 3 — красный текст), ссылки на `/ads/campaigns/[campaignId]/[adsetId]`.
-- `src/app/(app)/ads/campaigns/[campaignId]/[adsetId]/page.tsx` — детали адсета: breadcrumbs, метрики, графики расхода и частоты (reference line «Выгорание» при y=3), воронка видео-просмотров (BarChart при наличии данных), табы Демография/Плейсменты/По часам (ленивая подгрузка), таблица объявлений с раскрытием дневных инсайтов по клику.
+- `src/app/(app)/ads/campaigns/[campaignId]/page.tsx` — детали кампании: breadcrumbs, метрики (в т.ч. частота), график расхода по дням — **ChartContainer** (config `spend`), **ChartTooltip** + **ChartTooltipContent** из `@/components/ui/chart`, LineChart, stroke `var(--color-spend)` (без ResponsiveContainer). Таблица адсетов (частота > 3 — красный текст), ссылки на `/ads/campaigns/[campaignId]/[adsetId]`.
+- `src/app/(app)/ads/campaigns/[campaignId]/[adsetId]/page.tsx` — детали адсета: breadcrumbs, метрики, графики расхода и частоты (ResponsiveContainer + Recharts Tooltip, reference line «Выгорание» при y=3), воронка видео-просмотров (BarChart при наличии данных), табы Демография/Плейсменты/По часам (ленивая подгрузка), таблица объявлений с раскрытием дневных инсайтов по клику.
 
 ## Стор состояния
 
@@ -277,6 +293,7 @@
     - `projects: Project[]`
     - `activeProject: Project | null`
     - `setProjects`, `setActiveProject`
+  - `Project.settings?: { meta_account_id?: string; [key: string]: unknown }`
   - Хранится в localStorage как `leadleap-project`.
 - `src/hooks/use-meta-account.ts`
   - Zustand + `persist`: `selectedAccountId`, `setSelectedAccountId`.

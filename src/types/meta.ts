@@ -16,6 +16,7 @@ export interface MetaCampaignInsight {
   spend: number
   impressions: number
   clicks: number
+  outbound_clicks: number
   results: number
   cost_per_result: number
   cpm: number
@@ -29,6 +30,13 @@ export interface MetaCampaignInsight {
   video_p100_watched: number
   video_thruplay: number
   account_currency: string
+  purchase_roas: number
+  quality_ranking: string | null
+  engagement_rate_ranking: string | null
+  conversion_rate_ranking: string | null
+  actions_json: Record<string, unknown>[] | null
+  action_values_json: Record<string, unknown>[] | null
+  cost_per_action_type_json: Record<string, unknown>[] | null
 }
 
 export interface MetaAdsetInsight {
@@ -42,6 +50,7 @@ export interface MetaAdsetInsight {
   spend: number
   impressions: number
   clicks: number
+  outbound_clicks: number
   results: number
   cost_per_result: number
   cpm: number
@@ -55,6 +64,13 @@ export interface MetaAdsetInsight {
   video_p100_watched: number
   video_thruplay: number
   account_currency: string
+  purchase_roas: number
+  quality_ranking: string | null
+  engagement_rate_ranking: string | null
+  conversion_rate_ranking: string | null
+  actions_json: Record<string, unknown>[] | null
+  action_values_json: Record<string, unknown>[] | null
+  cost_per_action_type_json: Record<string, unknown>[] | null
 }
 
 export interface MetaAdInsight {
@@ -70,6 +86,7 @@ export interface MetaAdInsight {
   spend: number
   impressions: number
   clicks: number
+  outbound_clicks: number
   results: number
   cost_per_result: number
   cpm: number
@@ -83,6 +100,13 @@ export interface MetaAdInsight {
   video_p100_watched: number
   video_thruplay: number
   account_currency: string
+  purchase_roas: number
+  quality_ranking: string | null
+  engagement_rate_ranking: string | null
+  conversion_rate_ranking: string | null
+  actions_json: Record<string, unknown>[] | null
+  action_values_json: Record<string, unknown>[] | null
+  cost_per_action_type_json: Record<string, unknown>[] | null
 }
 
 export interface MetaDemographicInsight {
@@ -152,12 +176,29 @@ export interface MetaHourlyInsight {
   ctr: number
 }
 
+export interface MetaDeviceInsight {
+  id: string
+  account_id: string
+  campaign_id: string | null
+  campaign_name: string
+  date: string
+  device_platform: string | null
+  spend: number
+  impressions: number
+  clicks: number
+  results: number
+  cpm: number
+  cpc: number
+  ctr: number
+}
+
 // Aggregated types for UI
 
 export interface CampaignAggregateRow {
   campaign_name: string
   campaign_id: string | null
   total_spend: number
+  total_purchase_roas: number
   total_impressions: number
   total_clicks: number
   total_results: number
@@ -174,6 +215,7 @@ export interface AdsetAggregateRow {
   campaign_id: string | null
   campaign_name: string
   total_spend: number
+  total_purchase_roas: number
   total_impressions: number
   total_reach: number
   avg_frequency: number

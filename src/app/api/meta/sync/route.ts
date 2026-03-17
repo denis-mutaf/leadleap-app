@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   fetchMetaInsights, fetchMetaAdsetInsights, fetchMetaAdInsights,
-  fetchMetaDemographicInsights, fetchMetaPlacementInsights,
+  fetchMetaDemographicInsights, fetchMetaDeviceInsights, fetchMetaPlacementInsights,
   fetchMetaGeoInsights, fetchMetaHourlyInsights,
   normalizeAccountId, extractResults, extractActionValue,
 } from '@/lib/meta-api'
@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
       const records = rows.map((row) => {
         const spend = parseFloat(String(row.spend)) || 0
         const results = extractResults(row.actions as ActionArr | undefined)
+        const purchaseRoasArr = row.purchase_roas as Array<{ action_type?: string; value?: string }> | undefined
+        const purchase_roas = purchaseRoasArr?.[0]?.value != null ? parseFloat(String(purchaseRoasArr[0].value)) || 0 : 0
         return {
           project_id: projectId,
           account_id: accountId,
@@ -42,6 +44,10 @@ export async function POST(req: NextRequest) {
           spend,
           impressions: parseInt(String(row.impressions), 10) || 0,
           clicks: parseInt(String(row.clicks), 10) || 0,
+          outbound_clicks: parseInt(
+            String((row.outbound_clicks as Array<{ action_type: string; value: string }>)?.[0]?.value ?? '0'),
+            10
+          ) || 0,
           results,
           cost_per_result: results > 0 ? spend / results : 0,
           cpm: parseFloat(String(row.cpm)) || 0,
@@ -56,11 +62,18 @@ export async function POST(req: NextRequest) {
           video_thruplay: extractActionValue(row.video_thruplay_watched_actions as ActionArr | undefined),
           account_currency: String(row.account_currency ?? 'USD'),
           fetched_at: new Date().toISOString(),
+          purchase_roas,
+          quality_ranking: row.quality_ranking != null ? String(row.quality_ranking) : null,
+          engagement_rate_ranking: row.engagement_rate_ranking != null ? String(row.engagement_rate_ranking) : null,
+          conversion_rate_ranking: row.conversion_rate_ranking != null ? String(row.conversion_rate_ranking) : null,
+          actions_json: row.actions ?? null,
+          action_values_json: row.action_values ?? null,
+          cost_per_action_type_json: row.cost_per_action_type ?? null,
         }
       })
       const { error, count } = await supabaseAdmin
         .from('meta_campaign_insights')
-        .upsert(records, { onConflict: 'project_id,account_id,campaign_name,date', count: 'exact' })
+        .upsert(records, { onConflict: 'project_id,account_id,campaign_id,date', count: 'exact' })
       if (error) console.error('campaign sync error:', error)
       else totalSynced += count ?? records.length
     }
@@ -72,6 +85,8 @@ export async function POST(req: NextRequest) {
       const records = rows.map((row) => {
         const spend = parseFloat(String(row.spend)) || 0
         const results = extractResults(row.actions as ActionArr | undefined)
+        const purchaseRoasArr = row.purchase_roas as Array<{ action_type?: string; value?: string }> | undefined
+        const purchase_roas = purchaseRoasArr?.[0]?.value != null ? parseFloat(String(purchaseRoasArr[0].value)) || 0 : 0
         return {
           project_id: projectId,
           account_id: accountId,
@@ -83,6 +98,10 @@ export async function POST(req: NextRequest) {
           spend,
           impressions: parseInt(String(row.impressions), 10) || 0,
           clicks: parseInt(String(row.clicks), 10) || 0,
+          outbound_clicks: parseInt(
+            String((row.outbound_clicks as Array<{ action_type: string; value: string }>)?.[0]?.value ?? '0'),
+            10
+          ) || 0,
           results,
           cost_per_result: results > 0 ? spend / results : 0,
           cpm: parseFloat(String(row.cpm)) || 0,
@@ -97,6 +116,13 @@ export async function POST(req: NextRequest) {
           video_thruplay: extractActionValue(row.video_thruplay_watched_actions as ActionArr | undefined),
           account_currency: String(row.account_currency ?? 'USD'),
           fetched_at: new Date().toISOString(),
+          purchase_roas,
+          quality_ranking: row.quality_ranking != null ? String(row.quality_ranking) : null,
+          engagement_rate_ranking: row.engagement_rate_ranking != null ? String(row.engagement_rate_ranking) : null,
+          conversion_rate_ranking: row.conversion_rate_ranking != null ? String(row.conversion_rate_ranking) : null,
+          actions_json: row.actions ?? null,
+          action_values_json: row.action_values ?? null,
+          cost_per_action_type_json: row.cost_per_action_type ?? null,
         }
       })
       const { error, count } = await supabaseAdmin
@@ -107,7 +133,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) { console.error('fetchMetaAdsetInsights error:', err) }
 
-  const [demoRes, placementRes, geoRes, hourlyRes, adRes] = await Promise.allSettled([
+  const [demoRes, placementRes, geoRes, hourlyRes, adRes, deviceRes] = await Promise.allSettled([
     (async () => {
       const rows = await fetchMetaDemographicInsights(accountId, token, dateFrom, dateTo)
       if (!rows.length) return 0
@@ -225,6 +251,8 @@ export async function POST(req: NextRequest) {
           if (!adId || !adName) return null
           const spend = parseFloat(String(row.spend)) || 0
           const results = extractResults(row.actions as ActionArr | undefined)
+          const purchaseRoasArr = row.purchase_roas as Array<{ action_type?: string; value?: string }> | undefined
+          const purchase_roas = purchaseRoasArr?.[0]?.value != null ? parseFloat(String(purchaseRoasArr[0].value)) || 0 : 0
           return {
             project_id: projectId,
             account_id: accountId,
@@ -238,6 +266,10 @@ export async function POST(req: NextRequest) {
             spend,
             impressions: parseInt(String(row.impressions), 10) || 0,
             clicks: parseInt(String(row.clicks), 10) || 0,
+            outbound_clicks: parseInt(
+              String((row.outbound_clicks as Array<{ action_type: string; value: string }>)?.[0]?.value ?? '0'),
+              10
+            ) || 0,
             results,
             cost_per_result: results > 0 ? spend / results : 0,
             cpm: parseFloat(String(row.cpm)) || 0,
@@ -252,6 +284,13 @@ export async function POST(req: NextRequest) {
             video_thruplay: extractActionValue(row.video_thruplay_watched_actions as ActionArr | undefined),
             account_currency: String(row.account_currency ?? 'USD'),
             fetched_at: new Date().toISOString(),
+            purchase_roas,
+            quality_ranking: row.quality_ranking != null ? String(row.quality_ranking) : null,
+            engagement_rate_ranking: row.engagement_rate_ranking != null ? String(row.engagement_rate_ranking) : null,
+            conversion_rate_ranking: row.conversion_rate_ranking != null ? String(row.conversion_rate_ranking) : null,
+            actions_json: row.actions ?? null,
+            action_values_json: row.action_values ?? null,
+            cost_per_action_type_json: row.cost_per_action_type ?? null,
           }
         })
         .filter((r): r is NonNullable<typeof r> => r !== null)
@@ -262,12 +301,96 @@ export async function POST(req: NextRequest) {
       if (error) { console.error('ad sync error:', error); return 0 }
       return count ?? records.length
     })(),
+    (async () => {
+      const rows = await fetchMetaDeviceInsights(accountId, token, dateFrom, dateTo)
+      if (!rows.length) return 0
+      const records = rows.map((row) => ({
+        project_id: projectId,
+        account_id: accountId,
+        campaign_id: row.campaign_id ? String(row.campaign_id) : null,
+        campaign_name: String(row.campaign_name),
+        date: String(row.date_start),
+        device_platform: row.device_platform ? String(row.device_platform) : null,
+        spend: parseFloat(String(row.spend)) || 0,
+        impressions: parseInt(String(row.impressions), 10) || 0,
+        clicks: parseInt(String(row.clicks), 10) || 0,
+        results: extractResults(row.actions as ActionArr | undefined),
+        cpm: parseFloat(String(row.cpm ?? '0')) || 0,
+        cpc: parseFloat(String(row.cpc ?? '0')) || 0,
+        ctr: parseFloat(String(row.ctr ?? '0')) || 0,
+        fetched_at: new Date().toISOString(),
+      }))
+      const { error, count } = await supabaseAdmin
+        .from('meta_device_insights')
+        .upsert(records, { onConflict: 'project_id,account_id,campaign_name,date,device_platform', count: 'exact' })
+      if (error) { console.error('device sync error:', error); return 0 }
+      return count ?? records.length
+    })(),
   ])
 
-  for (const res of [demoRes, placementRes, geoRes, hourlyRes, adRes]) {
+  for (const res of [demoRes, placementRes, geoRes, hourlyRes, adRes, deviceRes]) {
     if (res.status === 'fulfilled') totalSynced += res.value
     else console.error('parallel sync error:', res.reason)
   }
 
   return NextResponse.json({ success: true, rows_synced: totalSynced })
 }
+
+/*
+  SQL migration (meta_insights_new_metrics_and_device):
+
+  -- meta_campaign_insights: new columns
+  ALTER TABLE meta_campaign_insights
+    ADD COLUMN IF NOT EXISTS purchase_roas numeric,
+    ADD COLUMN IF NOT EXISTS quality_ranking text,
+    ADD COLUMN IF NOT EXISTS engagement_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS conversion_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS actions_json jsonb,
+    ADD COLUMN IF NOT EXISTS action_values_json jsonb,
+    ADD COLUMN IF NOT EXISTS cost_per_action_type_json jsonb;
+
+  -- meta_adset_insights: new columns
+  ALTER TABLE meta_adset_insights
+    ADD COLUMN IF NOT EXISTS purchase_roas numeric,
+    ADD COLUMN IF NOT EXISTS quality_ranking text,
+    ADD COLUMN IF NOT EXISTS engagement_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS conversion_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS actions_json jsonb,
+    ADD COLUMN IF NOT EXISTS action_values_json jsonb,
+    ADD COLUMN IF NOT EXISTS cost_per_action_type_json jsonb;
+
+  -- meta_ad_insights: new columns
+  ALTER TABLE meta_ad_insights
+    ADD COLUMN IF NOT EXISTS purchase_roas numeric,
+    ADD COLUMN IF NOT EXISTS quality_ranking text,
+    ADD COLUMN IF NOT EXISTS engagement_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS conversion_rate_ranking text,
+    ADD COLUMN IF NOT EXISTS actions_json jsonb,
+    ADD COLUMN IF NOT EXISTS action_values_json jsonb,
+    ADD COLUMN IF NOT EXISTS cost_per_action_type_json jsonb;
+
+  -- meta_device_insights table
+  CREATE TABLE IF NOT EXISTS meta_device_insights (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    campaign_id text,
+    campaign_name text NOT NULL,
+    date text NOT NULL,
+    device_platform text,
+    spend numeric NOT NULL DEFAULT 0,
+    impressions bigint NOT NULL DEFAULT 0,
+    clicks integer NOT NULL DEFAULT 0,
+    results integer NOT NULL DEFAULT 0,
+    cpm numeric NOT NULL DEFAULT 0,
+    cpc numeric NOT NULL DEFAULT 0,
+    ctr numeric NOT NULL DEFAULT 0,
+    fetched_at timestamptz,
+    UNIQUE(project_id, account_id, campaign_name, date, device_platform)
+  );
+
+  ALTER TABLE meta_device_insights ENABLE ROW LEVEL SECURITY;
+
+  CREATE POLICY "Allow all for authenticated" ON meta_device_insights
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+*/
