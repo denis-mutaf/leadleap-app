@@ -4,7 +4,9 @@
 - **Назначение**: внутренняя система для команды маркетингового агентства LeadLeap:
   - управление проектами клиентов и интеграциями;
   - база знаний (RAG) поверх клиентских документов;
-  - разделы для звонков, креативов и рекламных дашбордов (пока как заглушки).
+  - модуль звонков (список, детали, оценки, инсайты) и рейтинг менеджеров;
+  - генератор креативов (внешний API по `NEXT_PUBLIC_API_URL`);
+  - раздел рекламы (Meta Ads): аккаунты, синхронизация инсайтов, дашборд, кампании, адсеты, объявления, демография/плейсменты/гео/почасовые.
 
 ## Технологический стек
 
@@ -18,7 +20,8 @@
   - `next-themes` (dark/light, default: dark)
   - собственный `ThemeProvider` и `ThemeToggle`
 - **Аутентификация**: Clerk (`ClerkProvider`, middleware, /sign-in, /sign-up)
-- **Состояние**: Zustand (`src/store/project-store.ts`) — активный проект и список проектов
+- **Состояние**: Zustand — `project-store` (активный проект, список проектов), `use-meta-account` (выбранный Meta-аккаунт, persist в localStorage)
+- **Графики**: Recharts (LineChart, BarChart и др.) в разделе «Реклама»
 - **Анимации**: Framer Motion (анимированный сайдбар)
 - **Тосты**: Sonner
 - **Бэкенд/БД**: Supabase (Postgres + Storage + pgvector)
@@ -46,6 +49,7 @@
   - Навигация:
     - `/knowledge-base` — "База знаний"
     - `/calls` — "Звонки"
+    - `/managers` — "Менеджеры"
     - `/creatives` — "Креативы"
     - `/ads` — "Реклама"
     - `/settings` — "Настройки"
@@ -93,6 +97,26 @@
 - Функция:
   - `match_chunks(query_embedding, match_project_id, match_threshold, match_count)` — возвращает чанки с косинусной близостью выше порога.
 
+#### Таблицы Calls (Phase 3)
+
+- **managers** — менеджеры по проекту: `id`, `project_id`, `name`, `pbx_user`, `amo_user_id`, `created_at`. RLS: Allow all.
+- **clients** — клиенты: `id`, `project_id`, `phone`, `name`, `amo_lead_id`, `created_at`, `updated_at`. RLS: Allow all.
+- **calls** — звонки: `id`, `project_id`, `callid`, `manager_id`, `client_id`, `type`, `duration`, `audio_path`, `transcript`, `status`, `amo_lead_id`, `created_at`. RLS: Allow all.
+- **evaluations** — оценки звонков: `id`, `project_id`, `call_id`, `manager_id`, `score_greeting`, `score_needs`, `score_presentation`, `score_objections`, `score_closing`, `score_total`, `recommendations`, `raw_analysis` (jsonb), `created_at`. RLS: Allow all.
+- **call_insights** — инсайты по звонку: `id`, `project_id`, `call_id`, `client_id`, `extracted_name`, `extracted_property`, `extracted_budget`, `extracted_concerns`, `extracted_source`, `extracted_timeline`, `extracted_notes`, `created_at`. RLS: Allow all.
+
+#### Таблицы Meta Ads
+
+- Все таблицы привязаны к `project_id` (FK на `projects(id)` on delete cascade), RLS: Allow all.
+- **meta_ad_accounts** — аккаунты Meta по проекту: `id`, `project_id`, `account_id`, `account_name`, `account_currency`, `is_active`, `created_at`. Уникальность: `(project_id, account_id)`.
+- **meta_campaign_insights** — дневные инсайты по кампаниям: `project_id`, `account_id`, `campaign_id`, `campaign_name`, `date`, метрики (spend, impressions, clicks, results, cpm, cpc, ctr, reach, frequency, video_*), `account_currency`, `fetched_at`. Уникальность: `(project_id, account_id, campaign_name, date)`.
+- **meta_adset_insights** — инсайты по адсетам: структура аналогична, уникальность `(project_id, account_id, adset_name, campaign_name, date)`.
+- **meta_ad_insights** — инсайты по объявлениям: уникальность `(project_id, account_id, ad_id, date)`.
+- **meta_demographic_insights** — разбивка по возрасту/полу: уникальность `(project_id, account_id, campaign_name, date, age, gender)`.
+- **meta_placement_insights** — по платформам/позициям: уникальность `(project_id, account_id, campaign_name, date, publisher_platform, platform_position)`.
+- **meta_geo_insights** — по странам/регионам: уникальность `(project_id, account_id, campaign_name, date, country, region)`.
+- **meta_hourly_insights** — почасовые: уникальность `(project_id, account_id, campaign_name, date, hour)`.
+
 ## API слои
 
 ### 1. Projects API
@@ -139,6 +163,38 @@
 - `src/app/api/rag/search/route.ts`
   - Возвращает "сырые" результаты similarity search (чанки + similarity) для произвольного запроса.
 
+### 3. Calls API
+
+- `src/app/api/calls/route.ts`
+  - `GET` — список звонков: `projectId` обязателен, опционально `managerId`. Выборка с джойнами `manager`, `client`. Сортировка по `created_at` desc, limit 100. Ответ: `{ data: calls }`.
+- `src/app/api/calls/[id]/route.ts`
+  - `GET` — один звонок с `manager`, `client`; параллельно `evaluations` и `call_insights` по `call_id` (maybeSingle). Ответ: `{ call, evaluation, insight }`. 404 при отсутствии звонка.
+
+### 4. Managers API
+
+- `src/app/api/managers/route.ts`
+  - `GET` — список менеджеров проекта (`projectId`), сортировка по `name` asc. Ответ — массив.
+  - `POST` — создание менеджера: body `{ projectId, name, pbx_user }`, вставка в `managers`. Ответ 201 — созданная запись.
+- `src/app/api/managers/stats/route.ts`
+  - `GET` — статистика по менеджерам: `projectId` обязателен. Загрузка всех менеджеров и evaluations проекта; для каждого менеджера — `total_calls`, средние по всем score (округление до 1 знака). Менеджеры с `total_calls = 0` отфильтровываются. Сортировка по `avg_score` desc. Ответ — массив `ManagerStats` (тип в `@/types`).
+
+### 5. Meta Ads API
+
+- Токен Meta: один на приложение — `META_ACCESS_TOKEN` (env). Все роуты используют `supabaseAdmin` из `@/lib/supabase`.
+- `src/lib/meta-api.ts` — утилиты: `normalizeAccountId`, `extractResults`, `extractActionValue`, `fetchWithBackoff`, `fetchAllPages`; функции загрузки: `fetchMetaAdAccounts`, `fetchMetaInsights`, `fetchMetaAdsetInsights`, `fetchMetaAdInsights`, `fetchMetaDemographicInsights`, `fetchMetaPlacementInsights`, `fetchMetaGeoInsights`, `fetchMetaHourlyInsights`, `fetchMetaAds`, `fetchMetaAdPreview`.
+- `src/app/api/meta/accounts/route.ts` — `GET` — список аккаунтов проекта (`projectId` обязателен), активные, сортировка по `account_name`.
+- `src/app/api/meta/sync-accounts/route.ts` — `POST` — body `{ projectId }`: загрузка аккаунтов из Meta API, upsert в `meta_ad_accounts` по `(project_id, account_id)`.
+- `src/app/api/meta/sync/route.ts` — `POST` — body `{ projectId, accountId, dateFrom?, dateTo? }`: синхронизация всех инсайтов (campaigns, adsets, ads, demographic, placement, geo, hourly) в соответствующие таблицы.
+- `src/app/api/meta/sync-all/route.ts` — `POST` — cron: для всех активных записей `meta_ad_accounts` вызывает внутренне `/api/meta/sync` с `projectId` и `accountId`. Защита: `CRON_SECRET` или заголовок `x-vercel-cron`.
+- `src/app/api/meta/insights/route.ts` — `GET` — `projectId`, `accountId`, опционально `dateFrom`, `dateTo`, `campaignId`, `groupBy=campaign`: дневные строки или агрегат по кампаниям (`CampaignAggregateRow`).
+- `src/app/api/meta/adsets/route.ts` — `GET` — `projectId`, `accountId`, `campaignId`, опционально даты, `groupBy=adset`: строки или агрегат по адсетам (`AdsetAggregateRow`).
+- `src/app/api/meta/ad-insights/route.ts` — `GET` — `projectId`, `accountId`, `adsetId`, опционально даты: инсайты по объявлениям.
+- `src/app/api/meta/demographics/route.ts` — `GET` — `projectId`, `accountId`, опционально даты, `campaignName` (список через запятую).
+- `src/app/api/meta/placements/route.ts` — то же для плейсментов.
+- `src/app/api/meta/geo/route.ts` — то же для гео.
+- `src/app/api/meta/hourly/route.ts` — то же для почасовых, сортировка по `hour`.
+- `src/app/api/meta/preview/route.ts` — `GET` — `adId`, опционально `adFormat`: HTML-превью объявления из Meta API.
+
 ## UI-модули
 
 ### 1. Settings → Projects
@@ -180,6 +236,40 @@
     - вопрос/ответ AI + источники;
     - результаты поиска с релевантностью.
 
+### 3. Calls (Звонки)
+
+- `src/app/(app)/calls/page.tsx`
+  - Заголовок h-14, контент flex-1 overflow-y-auto. Таблица звонков: дата, менеджер, клиент, длительность, оценка/статус. Фильтр по менеджеру (Select). При клике — Sheet справа с деталями звонка: вкладки «Резюме», «Оценка», «Инсайты», «Транскрипт». Данные через API `/api/calls` и `/api/calls/[id]`. Типы: `Call`, `Evaluation`, `CallInsight`, `Manager` из `@/types`.
+
+### 4. Managers (Менеджеры)
+
+- `src/app/(app)/managers/page.tsx`
+  - Рейтинг менеджеров: карточки с аватаром (инициалы), именем, бейджем «Лучший» для первого, средним баллом (ScoreRing), числом звонков и мини-барами по критериям (приветствие, потребности, презентация, возражения, закрытие). Данные через `/api/managers/stats`. Тип `ManagerStats` из `@/types`.
+
+### 5. Creatives (Креативы)
+
+- `src/app/(app)/creatives/page.tsx`
+  - Генератор креативов. Данные с внешнего API: `NEXT_PUBLIC_API_URL` (Railway и т.п.). Паттерн: хедер h-14, галерея (flex-1 overflow-y-auto), две Sheet справа — «Создать» и «Настройки».
+  - **Генератор (Sheet «Создать»)**: URL продукта (парсинг с дебаунсом 800 мс и по Enter), цена, зона загрузки фото (drag-drop, paste, до 3), референсы (до 5), выбор формата (1:1, 9:16, 16:9, 4:5), тексты (headline, subheadline, cta, extraText), преимущества (до 4), промпт. Кнопка «Сгенерировать» — FormData в `POST ${API_URL}/creatives/generate`.
+  - **Настройки (Sheet «Настройки»)**: логотип, модель (NB / NB 2 / NB Pro), разрешение (0.5K–4K), стиль, цели (multi), язык, индустрия, ЦА, цвета (picker + hex), шрифты. Сохранение в localStorage (`leadleap_creatives_settings`), без сериализации `logoFile`.
+  - **API вызовы**: `GET ${API_URL}/creatives/history` — галерея; `POST .../creatives/parse-product` — парсинг по URL; `POST .../creatives/fetch-image` — картинка по URL в composition; `POST .../creatives/generate` — генерация (FormData: model, format, imageSize, тексты, benefits, goals, photos, references, brandbook и др.).
+  - Галерея: masonry (CSS columns), скелетоны при загрузке, empty state, карточки с кнопкой «Скачать».
+
+### 6. Ads (Реклама)
+
+- `src/types/meta.ts` — типы: `MetaAdAccount`, `MetaCampaignInsight`, `MetaAdsetInsight`, `MetaAdInsight`, `MetaDemographicInsight`, `MetaPlacementInsight`, `MetaGeoInsight`, `MetaHourlyInsight`, `CampaignAggregateRow`, `AdsetAggregateRow`.
+- `src/hooks/use-meta-account.ts` — Zustand store `useMetaAccountStore`: `selectedAccountId`, `setSelectedAccountId`; persist в localStorage `meta-account-store`.
+- Страницы используют `useProjectStore` (activeProject?.id) и `useMetaAccountStore`; во все запросы к Meta API передаётся `projectId`.
+- `src/app/(app)/ads/layout.tsx` — layout с анимацией (Framer Motion, AnimatePresence по pathname).
+- `src/app/(app)/ads/page.tsx` — дашборд «Реклама»:
+  - Тулбар: Select аккаунта (из `/api/meta/accounts?projectId=...`), период (dateFrom/dateTo), кнопки «Загрузить аккаунты» (POST sync-accounts, перезагрузка списка) и «Синхронизировать» (POST sync с projectId, accountId, dateFrom, dateTo).
+  - Шесть карточек метрик (расход, показы, клики, результаты, CTR, CPC), LineChart расхода по дням (Recharts), таблица топ-5 кампаний по spend, ссылка «Все кампании» → `/ads/campaigns`.
+  - Состояния: скелетоны, пустое состояние при отсутствии проекта/аккаунта или данных.
+- `src/app/(app)/ads/campaigns/layout.tsx` — такой же анимированный layout.
+- `src/app/(app)/ads/campaigns/page.tsx` — список кампаний (из insights с `groupBy=campaign`), ссылки на `/ads/campaigns/[campaignId]`.
+- `src/app/(app)/ads/campaigns/[campaignId]/page.tsx` — детали кампании: breadcrumbs, метрики (в т.ч. частота), LineChart расхода по дням, таблица адсетов (частота > 3 — красный текст), ссылки на `/ads/campaigns/[campaignId]/[adsetId]`.
+- `src/app/(app)/ads/campaigns/[campaignId]/[adsetId]/page.tsx` — детали адсета: breadcrumbs, метрики, графики расхода и частоты (reference line «Выгорание» при y=3), воронка видео-просмотров (BarChart при наличии данных), табы Демография/Плейсменты/По часам (ленивая подгрузка), таблица объявлений с раскрытием дневных инсайтов по клику.
+
 ## Стор состояния
 
 - `src/store/project-store.ts`
@@ -188,13 +278,20 @@
     - `activeProject: Project | null`
     - `setProjects`, `setActiveProject`
   - Хранится в localStorage как `leadleap-project`.
+- `src/hooks/use-meta-account.ts`
+  - Zustand + `persist`: `selectedAccountId`, `setSelectedAccountId`.
+  - Ключ localStorage: `meta-account-store`.
 
 ## ENV и деплой
 
 - `.env.local` / `.env.example`:
   - Clerk: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, URL’ы sign-in/sign-up.
   - Supabase: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-  - App: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` (для Express backend и webhook).
+  - App: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` (креативы — history, parse-product, fetch-image, generate; webhook).
+  - Meta Ads: `META_ACCESS_TOKEN` — единый токен доступа к Meta Marketing API.
+  - Cron: `CRON_SECRET` — секрет для авторизации вызова `/api/meta/sync-all` (если не Vercel Cron).
+- `vercel.json`:
+  - `crons`: `{ "path": "/api/meta/sync-all", "schedule": "0 6 * * *" }` — ежедневная синхронизация инсайтов в 06:00.
 - Деплой предполагается на Vercel:
   - проект `leadleap-app`, preset — Next.js;
   - env‑переменные с Vercel синхронизируются с `.env.example` (значения заполняются вручную).
