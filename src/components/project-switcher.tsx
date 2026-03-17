@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { ChevronsUpDown, Plus, FolderKanban } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +18,7 @@ import { ProjectAvatar } from '@/components/project-avatar'
 
 export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const { projects, activeProject, setProjects, setActiveProject } = useProjectStore()
+  const router = useRouter()
 
   useEffect(() => {
     fetch('/api/projects')
@@ -24,7 +26,10 @@ export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
       .then((data) => {
         if (Array.isArray(data)) {
           setProjects(data)
-          if (!activeProject && data.length > 0) {
+
+          // Check if store already has an active project after hydration
+          const currentActive = useProjectStore.getState().activeProject
+          if (!currentActive && data.length > 0) {
             setActiveProject(data[0])
           }
         }
@@ -71,7 +76,10 @@ export function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
         {projects.map((project) => (
           <DropdownMenuItem
             key={project.id}
-            onClick={() => setActiveProject(project)}
+            onClick={() => {
+              setActiveProject(project)
+              router.push(`/ads/${project.slug}`)
+            }}
             className="gap-2 cursor-pointer"
           >
             <ProjectAvatar name={project.name} logoUrl={project.logo_url} size="sm" />

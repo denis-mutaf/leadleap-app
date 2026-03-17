@@ -33,18 +33,22 @@ export async function GET(req: NextRequest) {
   const raw = data ?? []
 
   if (groupBy === 'campaign') {
-    const grouped: Record<string, CampaignAggregateRow & { _cpm: number; _cpc: number; _ctr: number }> = {}
+    const grouped: Record<
+      string,
+      CampaignAggregateRow & { _cpm: number; _cpc: number; _ctr: number; _roas_weighted: number }
+    > = {}
     for (const row of raw) {
       const key = row.campaign_name
       if (!grouped[key]) {
         grouped[key] = {
           campaign_name: row.campaign_name, campaign_id: row.campaign_id ?? null,
-          total_spend: 0, total_impressions: 0, total_clicks: 0, total_results: 0,
+          total_spend: 0, total_purchase_roas: 0, total_impressions: 0, total_clicks: 0, total_results: 0,
           avg_cpm: 0, avg_cpc: 0, avg_ctr: 0, avg_cost_per_result: 0,
-          days: 0, _cpm: 0, _cpc: 0, _ctr: 0,
+          days: 0, _cpm: 0, _cpc: 0, _ctr: 0, _roas_weighted: 0,
         }
       }
       grouped[key].total_spend += Number(row.spend ?? 0)
+      grouped[key]._roas_weighted += Number(row.purchase_roas ?? 0) * Number(row.spend ?? 0)
       grouped[key].total_impressions += Number(row.impressions ?? 0)
       grouped[key].total_clicks += Number(row.clicks ?? 0)
       grouped[key].total_results += Number(row.results ?? 0)
@@ -53,12 +57,13 @@ export async function GET(req: NextRequest) {
       grouped[key]._ctr += Number(row.ctr ?? 0)
       grouped[key].days += 1
     }
-    const campaigns = Object.values(grouped).map(({ _cpm, _cpc, _ctr, ...c }) => ({
+    const campaigns = Object.values(grouped).map(({ _cpm, _cpc, _ctr, _roas_weighted, ...c }) => ({
       ...c,
       avg_cpm: c.days > 0 ? _cpm / c.days : 0,
       avg_cpc: c.days > 0 ? _cpc / c.days : 0,
       avg_ctr: c.days > 0 ? _ctr / c.days : 0,
       avg_cost_per_result: c.total_results > 0 ? c.total_spend / c.total_results : 0,
+      total_purchase_roas: c.total_spend > 0 ? _roas_weighted / c.total_spend : 0,
     }))
     return NextResponse.json({ data: campaigns })
   }

@@ -28,6 +28,7 @@ import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ProjectSwitcher } from '@/components/project-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { useProjectStore } from '@/store/project-store'
 
 const navItems = [
   { href: '/knowledge-base', label: 'База знаний', icon: BookOpen },
@@ -84,6 +85,11 @@ export function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
   const { signOut } = useClerk()
+  const activeProjectSlug = useProjectStore((s) => s.activeProject?.slug)
+  const slugFromUrl = pathname.startsWith('/ads/')
+    ? pathname.split('/')[2]
+    : null
+  const adsHref = `/ads/${activeProjectSlug ?? slugFromUrl ?? 'generic'}`
 
   const initials = user?.fullName
     ? user.fullName
@@ -145,7 +151,7 @@ export function Sidebar() {
           {navItems.map((item) => (
             <NavLink
               key={item.href}
-              {...item}
+              {...(item.href === '/ads' ? { ...item, href: adsHref } : item)}
               collapsed={collapsed}
               active={pathname.startsWith(item.href)}
             />

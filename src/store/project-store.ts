@@ -6,6 +6,10 @@ interface Project {
   name: string
   slug: string
   logo_url: string | null
+  settings?: {
+    meta_account_id?: string
+    [key: string]: unknown
+  }
 }
 
 interface ProjectStore {
