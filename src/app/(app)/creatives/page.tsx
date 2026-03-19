@@ -6,6 +6,12 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
@@ -30,6 +36,8 @@ import { useProjectStore } from '@/store/project-store'
 import { toast } from 'sonner'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
+/** Имя поля для файла логотипа в API генерации. Если не задано — логотип не отправляется (избегаем "Unexpected field"). */
+const CREATIVES_LOGO_FIELD = process.env.NEXT_PUBLIC_CREATIVES_LOGO_FIELD || ''
 
 const MODELS = [
   { key: 'nano-banana', label: 'NB', tag: 'Быстрый' },
@@ -86,10 +94,10 @@ type ParseProductResponse = {
   headline?: string | null
   subheadline?: string | null
   cta?: string | null
-  extraText?: string | null
+  extra_text?: string | null
   price?: string | null
   language?: string | null
-  userPrompt?: string | null
+  visual_prompt?: string | null
   benefits?: string[] | null
   image_url?: string | null
 }
@@ -125,14 +133,21 @@ function safeFileName(name: string) {
 }
 
 function base64ToFile(base64: string, fileName: string) {
-  const match = base64.match(/^data:(.+?);base64,(.+)$/)
-  if (!match) return null
-  const mime = match[1]
-  const b64 = match[2]
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new File([bytes], safeFileName(fileName), { type: mime })
+  let mime = 'image/jpeg'
+  let b64 = base64
+  const dataUrlMatch = base64.match(/^data:(.+?);base64,(.+)$/)
+  if (dataUrlMatch) {
+    mime = dataUrlMatch[1]
+    b64 = dataUrlMatch[2]
+  }
+  try {
+    const bin = atob(b64.replace(/\s/g, ''))
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return new File([bytes], safeFileName(fileName), { type: mime })
+  } catch {
+    return null
+  }
 }
 
 function ScrollArea({
@@ -184,6 +199,7 @@ export default function CreativesPage() {
   const [generating, setGenerating] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
+  const [detailItem, setDetailItem] = useState<HistoryItem | null>(null)
 
   const parseTimerRef = useRef<number | null>(null)
   const generatorPhotosInputRef = useRef<HTMLInputElement | null>(null)
@@ -315,6 +331,40 @@ export default function CreativesPage() {
     []
   )
 
+  /** Добавляет изображение в композицию из URL или data URL, полученных при парсинге. */
+  const addProductImageFromParse = useCallback(
+    async (urlOrData: string) => {
+      const s = urlOrData.trim()
+      if (!s) return
+      // Data URL
+      if (s.startsWith('data:')) {
+        const file = base64ToFile(s, 'product.jpg')
+        if (file) setCompositionFiles((prev) => [file, ...prev].slice(0, 3))
+        return
+      }
+      // Сырой base64 (без префикса)
+      if (!s.startsWith('http://') && !s.startsWith('https://')) {
+        const dataUrl = `data:image/jpeg;base64,${s}`
+        const file = base64ToFile(dataUrl, 'product.jpg')
+        if (file) setCompositionFiles((prev) => [file, ...prev].slice(0, 3))
+        return
+      }
+      // Прямая ссылка — загрузка в клиенте, при ошибке (CORS) через API
+      try {
+        const res = await fetch(s, { mode: 'cors' })
+        if (!res.ok) throw new Error('Fetch failed')
+        const blob = await res.blob()
+        const mime = blob.type || 'image/jpeg'
+        const ext = mime.split('/')[1] || 'jpg'
+        const file = new File([blob], `product.${ext}`, { type: mime })
+        setCompositionFiles((prev) => [file, ...prev].slice(0, 3))
+      } catch {
+        await handleFetchImage(s)
+      }
+    },
+    [handleFetchImage]
+  )
+
   const handleParseProduct = useCallback(async () => {
     if (!API_URL) {
       setParseError('API URL не настроен')
@@ -349,10 +399,10 @@ export default function CreativesPage() {
       if (typeof parsed.headline === 'string') setHeadline(parsed.headline)
       if (typeof parsed.subheadline === 'string') setSubheadline(parsed.subheadline)
       if (typeof parsed.cta === 'string') setCta(parsed.cta)
-      if (typeof parsed.extraText === 'string') setExtraText(parsed.extraText)
+      if (typeof parsed.extra_text === 'string') setExtraText(parsed.extra_text)
       if (typeof parsed.price === 'string') setPrice(parsed.price)
       if (typeof parsed.language === 'string') setLanguage(parsed.language)
-      if (typeof parsed.userPrompt === 'string') setUserPrompt(parsed.userPrompt)
+      if (typeof parsed.visual_prompt === 'string') setUserPrompt(parsed.visual_prompt)
 
       if (Array.isArray(parsed.benefits) && parsed.benefits.length > 0) {
         const next = parsed.benefits
@@ -361,12 +411,18 @@ export default function CreativesPage() {
         if (next.length > 0) setBenefits(next)
       }
 
-      if (
-        typeof parsed.image_url === 'string' &&
-        parsed.image_url &&
-        parsed.image_url !== 'null'
-      ) {
-        void handleFetchImage(parsed.image_url)
+      const raw = parsed as Record<string, unknown>
+      const imageUrl =
+        (typeof parsed.image_url === 'string' && parsed.image_url && parsed.image_url !== 'null'
+          ? parsed.image_url
+          : null) ??
+        (typeof raw.product_image === 'string' && raw.product_image ? raw.product_image : null) ??
+        (typeof raw.image === 'string' && raw.image ? raw.image : null)
+      const imageBase64 = typeof raw.image_base64 === 'string' && raw.image_base64 ? raw.image_base64 : null
+      if (imageUrl) {
+        await addProductImageFromParse(imageUrl)
+      } else if (imageBase64) {
+        await addProductImageFromParse(imageBase64)
       }
     } catch {
       setParseError('Ошибка парсинга')
@@ -381,7 +437,7 @@ export default function CreativesPage() {
     targetAudience,
     industry,
     format,
-    handleFetchImage,
+    addProductImageFromParse,
   ])
 
   // Debounced parse on URL change
@@ -471,7 +527,9 @@ export default function CreativesPage() {
 
       compositionFiles.forEach((f) => fd.append('photos', f))
       referenceFiles.forEach((f) => fd.append('references', f))
-      if (logoFile) fd.append('brandbook', logoFile)
+      if (logoFile && CREATIVES_LOGO_FIELD) {
+        fd.append(CREATIVES_LOGO_FIELD, logoFile, logoFile.name)
+      }
 
       const res = await fetch(`${API_URL}/creatives/generate`, {
         method: 'POST',
@@ -652,7 +710,7 @@ export default function CreativesPage() {
               </div>
             ))}
           </div>
-        ) : !hasItems ? (
+        ) : !hasItems && !generating ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
             <ImageOff size={40} className="text-muted-foreground/40" />
             <div>
@@ -664,9 +722,35 @@ export default function CreativesPage() {
           </div>
         ) : (
           <div className="columns-[220px] gap-3 [column-fill:_balance]">
+            {generating && (
+              <div key="__generating__" className="mb-3 break-inside-avoid">
+                <div className="rounded-xl border border-border overflow-hidden bg-card">
+                  <Skeleton className="w-full h-64" />
+                  <div className="p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16 rounded-md" />
+                      <Skeleton className="h-5 w-14 rounded-md" />
+                    </div>
+                    <Skeleton className="h-4 w-[85%] rounded-md" />
+                    <Skeleton className="h-3 w-24 rounded-md" />
+                  </div>
+                </div>
+              </div>
+            )}
             {historyItems.map((item) => (
               <div key={item.id} className="mb-3 break-inside-avoid">
-                <div className="rounded-xl border border-border overflow-hidden bg-card cursor-pointer group">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="rounded-xl border border-border overflow-hidden bg-card cursor-pointer group"
+                  onClick={() => setDetailItem(item)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setDetailItem(item)
+                    }
+                  }}
+                >
                   <div className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -717,6 +801,58 @@ export default function CreativesPage() {
           </div>
         )}
       </div>
+
+      {/* Creative detail modal */}
+      <Dialog open={!!detailItem} onOpenChange={(open) => !open && setDetailItem(null)}>
+        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+          {detailItem && (
+            <>
+              <div className="relative aspect-[4/5] max-h-[70vh] w-full bg-muted">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={detailItem.image_url}
+                  alt={detailItem.headline ?? 'Креатив'}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <DialogHeader className="p-4 pb-2">
+                <DialogTitle className="line-clamp-2 pr-8">
+                  {detailItem.headline ?? 'Без заголовка'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="px-4 pb-4 space-y-3">
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  {detailItem.model && (
+                    <>
+                      <dt className="text-muted-foreground">Модель</dt>
+                      <dd>{detailItem.model}</dd>
+                    </>
+                  )}
+                  {detailItem.format && (
+                    <>
+                      <dt className="text-muted-foreground">Формат</dt>
+                      <dd>{detailItem.format}</dd>
+                    </>
+                  )}
+                  <dt className="text-muted-foreground">Дата</dt>
+                  <dd>{formatRuDate(detailItem.created_at)}</dd>
+                </dl>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    void onDownload(detailItem)
+                  }}
+                >
+                  <Download size={14} className="mr-2" />
+                  Скачать
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Generator Sheet */}
       <Sheet open={generatorOpen} onOpenChange={setGeneratorOpen}>
@@ -889,7 +1025,7 @@ export default function CreativesPage() {
                       key={f.value}
                       type="button"
                       variant="outline"
-                      className={`h-9 text-xs ${format === f.value ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                      className={`h-9 text-xs ${format === f.value ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                       onClick={() => setFormatAndCloseParseError(f.value)}
                     >
                       {f.value}
@@ -1115,7 +1251,7 @@ export default function CreativesPage() {
                     <Button
                       key={m.key}
                       variant="outline"
-                      className={`h-9 text-xs flex flex-col leading-none ${selectedModel === m.key ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                      className={`h-9 text-xs flex flex-col leading-none ${selectedModel === m.key ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                       onClick={() => setSelectedModel(m.key)}
                     >
                       <span>{m.label}</span>
@@ -1137,7 +1273,7 @@ export default function CreativesPage() {
                     <Button
                       key={r.key}
                       variant="outline"
-                      className={`h-9 text-xs flex flex-col leading-none ${imageSize === r.key ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                      className={`h-9 text-xs flex flex-col leading-none ${imageSize === r.key ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                       onClick={() => setImageSize(r.key)}
                     >
                       <span>{r.label}</span>
@@ -1159,7 +1295,7 @@ export default function CreativesPage() {
                     <Button
                       key={s.key}
                       variant="outline"
-                      className={`h-9 text-xs ${style === s.key ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                      className={`h-9 text-xs ${style === s.key ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                       onClick={() => setStyle(s.key)}
                     >
                       {s.label}
@@ -1180,7 +1316,7 @@ export default function CreativesPage() {
                       <Button
                         key={g.value}
                         variant="outline"
-                        className={`h-9 text-xs ${active ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                        className={`h-9 text-xs ${active ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                         onClick={() => toggleGoal(g.value)}
                       >
                         {g.label}
@@ -1200,7 +1336,7 @@ export default function CreativesPage() {
                     <Button
                       key={l.key}
                       variant="outline"
-                      className={`h-9 text-xs ${language === l.key ? 'bg-primary text-primary-foreground border-primary' : ''}`}
+                      className={`h-9 text-xs ${language === l.key ? '!bg-primary !text-primary-foreground !border-primary' : ''}`}
                       onClick={() => setLanguage(l.key)}
                     >
                       {l.label}

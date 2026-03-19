@@ -35,6 +35,7 @@ const navItems = [
   { href: '/calls', label: 'Звонки', icon: Phone },
   { href: '/managers', label: 'Менеджеры', icon: Users },
   { href: '/creatives', label: 'Креативы', icon: Sparkles },
+  { href: '/generator', label: 'Генератор', icon: Sparkles },
   { href: '/ads', label: 'Реклама', icon: BarChart2 },
 ]
 

@@ -260,8 +260,10 @@
   - Генератор креативов. Данные с внешнего API: `NEXT_PUBLIC_API_URL` (Railway и т.п.). Паттерн: хедер h-14, галерея (flex-1 overflow-y-auto), две Sheet справа — «Создать» и «Настройки».
   - **Генератор (Sheet «Создать»)**: URL продукта (парсинг с дебаунсом 800 мс и по Enter), цена, зона загрузки фото (drag-drop, paste, до 3), референсы (до 5), выбор формата (1:1, 9:16, 16:9, 4:5), тексты (headline, subheadline, cta, extraText), преимущества (до 4), промпт. Кнопка «Сгенерировать» — FormData в `POST ${API_URL}/creatives/generate`.
   - **Настройки (Sheet «Настройки»)**: логотип, модель (NB / NB 2 / NB Pro), разрешение (0.5K–4K), стиль, цели (multi), язык, индустрия, ЦА, цвета (picker + hex), шрифты. Сохранение в localStorage (`leadleap_creatives_settings`), без сериализации `logoFile`.
-  - **API вызовы**: `GET ${API_URL}/creatives/history` — галерея; `POST .../creatives/parse-product` — парсинг по URL; `POST .../creatives/fetch-image` — картинка по URL в composition; `POST .../creatives/generate` — генерация (FormData: model, format, imageSize, тексты, benefits, goals, photos, references, brandbook и др.).
-  - Галерея: masonry (CSS columns), скелетоны при загрузке, empty state, карточки с кнопкой «Скачать».
+  - **Автозаполнение при `parse-product`**: помимо текстовых полей парсер пытается автоматически добавить изображение товара в composition (из `image_url` / `product_image` / `image` / `image_base64`, включая data URL и raw base64; при необходимости fallback на `POST .../creatives/fetch-image`).
+  - **Галерея**: masonry (CSS columns), skeleton-карточка при активной генерации, empty state, карточки с кнопкой «Скачать».
+  - **Модалка по клику**: по нажатию на карточку креатива открывается модальное окно с подробностями (модель, формат, headline, дата) и кнопкой «Скачать».
+  - **API вызовы**: `GET ${API_URL}/creatives/history` — галерея; `POST .../creatives/parse-product` — парсинг по URL; `POST .../creatives/fetch-image` — картинка по URL в composition; `POST .../creatives/generate` — генерация (FormData: model, format, imageSize, тексты, benefits, goals, photos, references, brandbook/logo и др.).
 
 ### 6. Ads (Реклама)
 
@@ -305,6 +307,7 @@
   - Clerk: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, URL’ы sign-in/sign-up.
   - Supabase: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
   - App: `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` (креативы — history, parse-product, fetch-image, generate; webhook).
+  - Creatives: `NEXT_PUBLIC_CREATIVES_LOGO_FIELD` (опционально) — имя multipart-поля для логотипа в `POST ${API_URL}/creatives/generate`. Если не задано — логотип не отправляется (чтобы избежать ошибок `Unexpected field`).
   - Meta Ads: `META_ACCESS_TOKEN` — единый токен доступа к Meta Marketing API.
   - Cron: `CRON_SECRET` — секрет для авторизации вызова `/api/meta/sync-all` (если не Vercel Cron).
 - `vercel.json`:
